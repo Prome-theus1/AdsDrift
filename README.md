@@ -23,6 +23,26 @@ MACE-MH-1 权重。MACE-MH-1 需要从其
 希望继续项目的贡献者可以先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)；第三方代码
 来源与许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
+## MACE-MH-1 在 AdsDrift 中的作用
+
+AdsDrift 采用 **MACE-MH-1 作为冻结的特征编码器**。训练时使用
+`oc20_usemppbe` head，从 MACE-MH-1 的两个 interaction layer 提取吸附物与
+可移动表面原子的表示，并在该特征空间中构造 Drifting 分布学习目标。
+MACE-MH-1 的参数始终冻结，但生成结构到 MACE 特征的坐标计算图保持可微，
+因此特征损失的梯度能够传回 AdsDrift 生成器。
+
+MACE-MH-1 在这里不是待训练的 AdsDrift 生成器，也不是用于最终结构排序的
+能量标签器。训练完成后，仅执行 AdsDrift 生成器的一步结构生成时不需要运行
+MACE。仓库不分发 MACE-MH-1 权重；请从
+[MACE-MH-1 官方模型页](https://huggingface.co/mace-foundations/mace-mh-1)
+单独获取，并遵守其上游许可证。
+
+> **English:** AdsDrift uses MACE-MH-1 as a frozen, differentiable feature
+> encoder during training. Features from the `oc20_usemppbe` head define the
+> Drifting objective, while gradients with respect to generated coordinates
+> are propagated back into the AdsDrift generator. MACE-MH-1 weights are not
+> redistributed here, and generator-only inference does not run MACE.
+
 本文描述 `test_18`：继承 `test_16`，将每个块的并行三分支聚合改为
 “slab/吸附物自注意力残差 → 双向交叉注意力残差 → FFN”。交叉注意力
 读取该层自注意力更新后的特征。初始化（包括全图几何嵌入及晶体条件）
