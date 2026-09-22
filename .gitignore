@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments and local configuration
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+
+# Training data, outputs, and logs
+dataset/
+datasets/
+data/raw/
+runs/
+outputs/
+checkpoints/
+wandb/
+*.log
+training_dashboard.png
+training_metrics_summary.json
+
+# Model weights are distributed separately under their own licenses.
+*.ckpt
+*.pth
+*.pt
+*.model
+!model/generator/core/Jd.pt
+
+# Generated structures and local archives
+*.npz
+*.pkl
+*.pickle
+*.tar
+*.tar.gz
+*.zip

@@ -1,0 +1,12 @@
+AdsDrift
+Copyright 2026 AdsDrift contributors
+
+This product includes software derived from EquiformerV3 and FAIR Chemistry
+software developed by Meta Platforms, Inc. and affiliates, distributed under
+the MIT License.
+
+This product includes Wigner-D routines derived from e3nn, distributed under
+the MIT License.
+
+The complete attribution and upstream project links are documented in
+THIRD_PARTY_NOTICES.md.

@@ -1,0 +1,60 @@
+schema_version: 1
+target_adsorbate: "*NH"
+split_policy: >-
+  Hold out complete slab-adsorbate conditions. No R0, positive endpoint, or
+  feature from validation/test systems is used for training.
+
+nh_train:
+  - system_id: "74_9257_31"
+    slab_atomic_numbers: [26, 40, 42]
+    role: original_reference
+  - system_id: "74_122_9"
+    slab_atomic_numbers: [83]
+    role: elemental_diversity
+  - system_id: "74_1333_12"
+    slab_atomic_numbers: [41, 50]
+    role: elemental_diversity
+  - system_id: "74_2292_35"
+    slab_atomic_numbers: [27, 39]
+    role: supplies_Y_for_compositional_holdout
+  - system_id: "74_3228_3"
+    slab_atomic_numbers: [31, 46]
+    role: supplies_Pd_for_compositional_holdout
+  - system_id: "74_3365_7"
+    slab_atomic_numbers: [44, 73]
+    role: elemental_diversity
+
+auxiliary_diatomic_train:
+  - {system_id: "6_6245_81", adsorbate: "*CH", slab_atomic_numbers: [14, 26, 40]}
+  - {system_id: "6_2157_29", adsorbate: "*CH", slab_atomic_numbers: [42, 52]}
+  - {system_id: "2_2121_34", adsorbate: "*OH", slab_atomic_numbers: [40, 46]}
+  - {system_id: "76_6636_40", adsorbate: "*NO", slab_atomic_numbers: [15, 42, 44]}
+  - {system_id: "17_6587_7", adsorbate: "*C*C", slab_atomic_numbers: [26, 40, 51]}
+  - {system_id: "69_6782_11", adsorbate: "*N2", slab_atomic_numbers: [21, 27, 31]}
+
+validation_nh:
+  - system_id: "74_300_19"
+    slab_atomic_numbers: [26, 46]
+    difficulty: unseen_combination_seen_elements
+
+test_nh:
+  - system_id: "74_2326_1"
+    slab_atomic_numbers: [39, 46]
+    difficulty: unseen_combination_seen_elements
+    note: Y is seen in 74_2292_35 and Pd is seen in 74_3228_3
+  - system_id: "74_3610_6"
+    slab_atomic_numbers: [23, 24]
+    difficulty: unseen_elements_and_combination
+    note: V and Cr are excluded from both training configurations
+
+comparison:
+  optimizer_steps_per_run: 15000
+  warmup_steps_per_run: 12
+  nh_only:
+    conditions: 6
+    epochs: 2500
+    steps_per_epoch: 6
+  nh_plus_auxiliary:
+    conditions: 12
+    epochs: 1250
+    steps_per_epoch: 12

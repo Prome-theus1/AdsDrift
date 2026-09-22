@@ -1,0 +1,29 @@
+#!/bin/bash
+#PBS -N oc20dense-cond
+#PBS -P 11014460
+#PBS -q normal
+#PBS -l select=1:ncpus=16:mem=64gb
+#PBS -l walltime=12:00:00
+#PBS -j oe
+#PBS -S /bin/bash
+
+set -euo pipefail
+PROJECT_ROOT=/path/to/project_OC2M
+TEST_ROOT="$PROJECT_ROOT/test/test_18"
+RAW_ROOT="$PROJECT_ROOT/data/oc20_dense_original"
+SYSTEMS_ROOT="$PROJECT_ROOT/dataset/drift_oc20dense_0p50eV_v1/systems"
+
+source "$TEST_ROOT/AdsDrift/activate_as2p_conda.sh"
+cd "$TEST_ROOT"
+
+MAPPING=$(find "$RAW_ROOT/extracted/mappings" -type f -name oc20dense_mapping.pkl -print -quit)
+if [[ -z "$MAPPING" ]]; then
+    echo "oc20dense_mapping.pkl not found" >&2
+    exit 1
+fi
+
+python -m AdsDrift.data.recover_oc20dense_conditions \
+    --systems-root "$SYSTEMS_ROOT" \
+    --mapping "$MAPPING" \
+    --bulks "$RAW_ROOT/archives/bulks.pkl" \
+    --report "$RAW_ROOT/condition_recovery_report.json"

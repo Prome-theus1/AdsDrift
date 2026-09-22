@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "system_id": "0_1190_0",
+  "primitive": {
+    "atomic_numbers": [29],
+    "fractional_positions": [[0.0, 0.0, 0.0]],
+    "cell": [[3.6, 0.0, 0.0], [0.0, 3.6, 0.0], [0.0, 0.0, 3.6]]
+  },
+  "surface": {
+    "miller_index": [1, 1, 1],
+    "miller_basis": "provided conventional standard bulk",
+    "conventional_cell": [[3.6, 0.0, 0.0], [0.0, 3.6, 0.0], [0.0, 0.0, 3.6]],
+    "termination_shift": 0.25,
+    "top": true
+  },
+  "construction": {
+    "supercell_matrix": [[3, 0, 0], [0, 3, 0], [0, 0, 1]],
+    "slab_layers": 4,
+    "vacuum_A": 15.0,
+    "strain_voigt": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "adsorbates_per_cell": 1
+  },
+  "adsorbate": {
+    "atomic_numbers": [8]
+  },
+  "provenance": {
+    "note": "Example values only; replace every field with the actual construction record."
+  }
+}

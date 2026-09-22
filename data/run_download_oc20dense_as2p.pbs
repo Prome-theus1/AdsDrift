@@ -1,0 +1,15 @@
+#!/bin/bash
+#PBS -N oc20dense-raw
+#PBS -P 11014460
+#PBS -q normal
+#PBS -l select=1:ncpus=2:mem=8gb
+#PBS -l walltime=08:00:00
+#PBS -j oe
+#PBS -S /bin/bash
+
+set -euo pipefail
+PROJECT_ROOT=/path/to/project_OC2M
+TEST_ROOT="$PROJECT_ROOT/test/test_18"
+
+cd "$TEST_ROOT/AdsDrift"
+bash data/download_oc20dense_original.sh

@@ -1,0 +1,14 @@
+# Core numerical and atomistic stack. GPU-specific PyTorch builds may need to
+# be installed separately for the target CUDA environment.
+numpy
+scipy
+torch
+PyYAML
+ase
+matplotlib
+e3nn
+matscipy
+
+# Required only for the frozen MACE feature objective used during training.
+# The MACE-MH-1 weights are not included in this repository.
+mace-torch

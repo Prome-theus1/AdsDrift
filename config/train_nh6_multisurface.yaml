@@ -1,0 +1,80 @@
+data:
+  roots:
+    - dataset/drift_oc20dense_0p50eV_v1/systems/74_9257_31
+    - dataset/drift_oc20dense_0p50eV_v1/systems/74_122_9
+    - dataset/drift_oc20dense_0p50eV_v1/systems/74_1333_12
+    - dataset/drift_oc20dense_0p50eV_v1/systems/74_2292_35
+    - dataset/drift_oc20dense_0p50eV_v1/systems/74_3228_3
+    - dataset/drift_oc20dense_0p50eV_v1/systems/74_3365_7
+  r0_per_system: 100
+  positives_per_mode: 1
+  max_positive_modes: null
+  online_r0_resampling:
+    enabled: true
+    base_seed: 20260907
+    max_attempts_per_sample: 100
+    max_bank_retries: 4
+
+generator:
+  num_layers: 4
+  num_channels: 128
+  attn_hidden_channels: 64
+  num_heads: 8
+  attn_alpha_channels: 32
+  attn_value_channels: 16
+  ffn_hidden_channels: 256
+  lmax: 3
+  mmax: 2
+  attn_grid_resolution: [12, 8]
+  ffn_grid_resolution: [12, 12]
+  num_radial_basis: 64
+  edge_channels: 128
+  slab_radius_A: 6.0
+  adsorbate_radius_A: 4.5
+  cross_radius_A: 6.0
+  max_neighbors_per_relation: 24
+  periodic_image_range: 1
+  pbc_axes: [true, true, false]
+  norm_type: merge_layer_norm
+  attention_activation: sep-merge_gates2_swiglu
+  ffn_activation: sep-merge_gates2_swiglu
+  use_grid_mlp: true
+  use_add_merge: true
+  attention_weight_dropout: 0.0
+  ffn_dropout: 0.0
+  activation_checkpointing: true
+  surface_output_scale_A: 0.5
+  ads_center_output_scale_A: 3.0
+  ads_internal_output_scale_A: 1.0
+  max_atomic_number: 118
+  condition_hidden_channels: 128
+  condition_message_layers: 2
+  condition_num_radial_basis: 32
+  condition_max_distance_A: 8.0
+  condition_modulation_scale: 0.25
+
+drifting:
+  temperatures: [0.02, 0.05, 0.2]
+  feature_scale_floor: 1.0e-8
+  drift_scale_floor: 1.0e-10
+
+coordinate_gradient_balancing:
+  component_energy_fractions: [0.2, 0.2, 0.6]
+  energy_floor: 1.0e-20
+  maximum_component_rescale: 10000.0
+  preserve_total_energy: true
+
+training:
+  seed: 20260907
+  device: cuda
+  allow_tf32: true
+  epochs: 2500
+  learning_rate: 2.0e-4
+  betas: [0.9, 0.95]
+  weight_decay: 0.01
+  warmup_epochs: 2
+  gradient_clip_norm: 2.0
+  log_every_steps: 10
+  checkpoint_every_epochs: 500
+  resume: null
+  run_directory: test_18/runs/nh6_${PBS_JOBID}
