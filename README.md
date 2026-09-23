@@ -1,125 +1,149 @@
-# AdsDrift：条件吸附结构的一步生成模型
+# AdsDrift: A One-Pass Conditional Generator for Adsorption Structures
 
-> **项目状态 / Project status**
+> **Project status**
 >
-> AdsDrift 是作者开发的研究原型，目前原始开发已暂停，现按 Apache-2.0
-> 许可证公开，欢迎新的维护者、复现工作与后续研究从这里继续。本仓库按现状
-> 提供，不代表成熟的软件发布，也不承诺持续维护。
->
-> This repository is an as-is research handoff. The original development is
-> paused, and new maintainers, reproductions, and research extensions are
-> welcome.
+> AdsDrift is a research prototype developed by the original author. Active
+> development has paused, and the project is now released under the Apache-2.0
+> License so that new maintainers, reproduction efforts, and follow-up research
+> can continue from this point. The repository is provided as is. It is not a
+> production-ready software release, and ongoing maintenance is not guaranteed.
 
-AdsDrift 面向催化剂筛选：给定一个固定的表面—吸附物体系，从覆盖晶面的随机初始结构出发，一次生成器前向计算得到一组接近低能终点的候选结构。训练目标是该体系下的低能构型分布；生成结果可以用于后续去重、能量排序和短弛豫。
+AdsDrift is designed for catalyst screening. Given a fixed surface-adsorbate
+system, it maps randomly initialized structures distributed across a surface to
+a set of candidate structures near low-energy endpoints in a single generator
+forward pass. The training target is the distribution of low-energy
+configurations for that system. Generated structures can subsequently be
+deduplicated, ranked by energy, and subjected to short relaxations.
 
-## 开源范围
+## What is included
 
-仓库包含当前模型架构、训练与生成代码、配置样例和数据制备工具。以下内容
-**不随仓库分发**：训练数据、AdsDrift 训练 checkpoint、运行结果，以及
-MACE-MH-1 权重。MACE-MH-1 需要从其
-[官方发布页](https://huggingface.co/mace-foundations/mace-mh-1) 单独获取并遵守
-上游 ASL 许可证；可通过环境变量 `ADSDRIFT_MACE_CHECKPOINT` 指定本地路径。
+This repository contains the current model architecture, training and
+generation code, example configurations, and data-preparation utilities. It
+does **not** distribute training data, trained AdsDrift checkpoints, run
+outputs, or MACE-MH-1 weights. MACE-MH-1 must be obtained separately from its
+[official model page](https://huggingface.co/mace-foundations/mace-mh-1) and
+used in accordance with the upstream ASL license. Set
+`ADSDRIFT_MACE_CHECKPOINT` to the local checkpoint path.
 
-希望继续项目的贡献者可以先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)；第三方代码
-来源与许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+Prospective contributors should begin with [CONTRIBUTING.md](CONTRIBUTING.md).
+Third-party code origins and license notices are documented in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## MACE-MH-1 在 AdsDrift 中的作用
+## How AdsDrift uses MACE-MH-1
 
-AdsDrift 采用 **MACE-MH-1 作为冻结的特征编码器**。训练时使用
-`oc20_usemppbe` head，从 MACE-MH-1 的两个 interaction layer 提取吸附物与
-可移动表面原子的表示，并在该特征空间中构造 Drifting 分布学习目标。
-MACE-MH-1 的参数始终冻结，但生成结构到 MACE 特征的坐标计算图保持可微，
-因此特征损失的梯度能够传回 AdsDrift 生成器。
+AdsDrift uses **MACE-MH-1 as a frozen, differentiable feature encoder during
+training**. Representations for the adsorbate and movable surface atoms are
+read from both MACE-MH-1 interaction layers using the `oc20_usemppbe` head.
+These representations define the feature space in which the Drifting
+distribution-learning objective is constructed. All MACE-MH-1 parameters
+remain frozen and the model stays in evaluation mode, but the computational
+graph from generated coordinates to MACE features is retained so that feature
+loss gradients can propagate back into the AdsDrift generator.
 
-MACE-MH-1 在这里不是待训练的 AdsDrift 生成器，也不是用于最终结构排序的
-能量标签器。训练完成后，仅执行 AdsDrift 生成器的一步结构生成时不需要运行
-MACE。仓库不分发 MACE-MH-1 权重；请从
-[MACE-MH-1 官方模型页](https://huggingface.co/mace-foundations/mace-mh-1)
-单独获取，并遵守其上游许可证。
+MACE-MH-1 is neither the trainable AdsDrift generator nor an energy labeler for
+final structure ranking. Once training is complete, generator-only one-pass
+structure generation does not run MACE. MACE-MH-1 weights are not redistributed
+in this repository.
 
-> **English:** AdsDrift uses MACE-MH-1 as a frozen, differentiable feature
-> encoder during training. Features from the `oc20_usemppbe` head define the
-> Drifting objective, while gradients with respect to generated coordinates
-> are propagated back into the AdsDrift generator. MACE-MH-1 weights are not
-> redistributed here, and generator-only inference does not run MACE.
+This repository describes the historical `test_18` implementation. It inherits
+from `test_16` and changes only the within-block aggregation order from parallel
+three-branch aggregation to "self-attention residuals, then cross-attention
+residuals, then FFN." Cross-attention reads the features already updated by
+self-attention in the same layer. Initialization, including the full-graph
+geometric embedding and crystal conditioning, is unchanged. Fixed-layer
+features are updated while their coordinates remain fixed. The implementation
+retains the frozen MACE feature space and the joint, non-isolated Drifting
+coordinate gradient restored on 12 September 2026. The parameter count is
+unchanged.
 
-本文描述 `test_18`：继承 `test_16`，将每个块的并行三分支聚合改为
-“slab/吸附物自注意力残差 → 双向交叉注意力残差 → FFN”。交叉注意力
-读取该层自注意力更新后的特征。初始化（包括全图几何嵌入及晶体条件）
-保持不变，固定层特征更新而坐标不动；继续采用冻结 MACE 特征空间和
-不隔离的联合 Drifting 坐标梯度（2026-09-12 恢复）。参数数量不变。
+To generate PDB files directly from a clean crystal or slab and an adsorbate,
+including a vacuum layer and the bundled adsorbate library, use
+[`generate/generate_pdb.py`](generate/generate_pdb.py). This generation path
+does not require MACE, another machine-learned force field, or a positive-sample
+bank. Run the script with `--help` for its command-line options.
 
-从新的干净晶体/slab 和吸附物直接生成 PDB（含真空层、吸附物库，不用 MACE/MLFF 或正样本 bank），使用 [generate/generate_pdb.py](generate/generate_pdb.py)；运行参数可通过该脚本的 `--help` 查看。
-
-## 1. 工程目录与调用关系
+## 1. Repository structure and data flow
 
 ```text
 AdsDrift/
-├── README.md                         # 统一的架构、数据与运行说明
-├── config/                          # 三套固定体系训练配置
-├── data/prepare_dataset.py           # 数据筛选、终点导出、训练索引
-├── generate/                        # 新晶体＋吸附物→生成器→PDB，含真空和分子库
-├── plot/plot_train.py                # 六面板训练仪表盘
+├── README.md                         # Architecture, data, and usage guide
+├── config/                           # Fixed-system training configurations
+├── data/prepare_dataset.py           # Filtering, endpoint export, and indexing
+├── generate/                         # Crystal + adsorbate -> generator -> PDB
+├── plot/plot_train.py                # Six-panel training dashboard
 ├── model/
-│   ├── __init__.py                   # Python 包声明与生成器导出
-│   ├── model.py                      # 完整模型组合、训练/推理入口
+│   ├── __init__.py                   # Package declarations and exports
+│   ├── model.py                      # Model composition and train/sample entry points
 │   ├── drifting/
-│   │   ├── loss.py                   # 联合核、漂移场、损失和指标
-│   │   ├── mace_features.py          # 冻结 MACE、固定配置与可微特征提取
-│   │   ├── mace_pt/                  # 本地外部权重目录（Git 忽略）
-│   │   └── distributed_objective.py  # 多卡生成样本联合计算漂移
+│   │   ├── loss.py                   # Joint kernel, drift fields, losses, and metrics
+│   │   ├── mace_features.py          # Frozen MACE configuration and feature extraction
+│   │   ├── mace_pt/                  # Local external weights, ignored by Git
+│   │   └── distributed_objective.py  # Joint multi-GPU candidate objective
 │   ├── generator/
-│   │   ├── generator.py               # 三分支局部等变生成器
-│   │   └── core/                      # 合并后的 AdsDrift 等变核心算子
+│   │   ├── generator.py              # Three-branch local equivariant generator
+│   │   └── core/                     # Consolidated equivariant operators
 │   ├── condition/
-│   │   ├── schema.py                  # 构造因子的严格数据协议
-│   │   └── encoder.py                 # 周期原胞图和构造因子编码器
+│   │   ├── schema.py                 # Strict factorized-condition schema
+│   │   └── encoder.py                # Periodic primitive-cell condition encoder
 │   ├── initialize/
-│   │   ├── generate_random_inputs.py # R0 采样、覆盖检查与绘图
-│   │   ├── inputs_to_structures.py   # NPZ 与 ASE 结构转换
-│   │   └── r0_resampling.py          # 按体系和 epoch 在线重新采样
+│   │   ├── generate_random_inputs.py # R0 sampling, coverage checks, and plots
+│   │   ├── inputs_to_structures.py   # NPZ-to-ASE structure conversion
+│   │   └── r0_resampling.py          # Online resampling by system and epoch
 │   └── utils/
-│       ├── data_loader.py                       # 条件数据加载、模式采样、batch
-│       ├── train.py                             # 单卡训练、日志和 checkpoint
-│       ├── multi_gpu_training.py                # 多卡训练
-│       ├── generate_structures.py               # checkpoint 一步生成与结构导出
-│       ├── structure_validation.py              # 周期几何、结构去重和异常检查
-│       └── screening_evaluation_metrics.py      # 筛选曲线与覆盖指标
+│       ├── data_loader.py                       # Conditional data loading and batching
+│       ├── train.py                             # Single-GPU training
+│       ├── multi_gpu_training.py                # Multi-GPU training
+│       ├── generate_structures.py               # One-pass checkpoint inference
+│       ├── structure_validation.py              # Periodic geometry and deduplication
+│       └── screening_evaluation_metrics.py      # Screening and coverage metrics
 ```
 
-`tests/` 包含条件置换不变性、构造因子敏感性、旋转等变性和反向传播测试。
+The historical development tree included tests for condition permutation
+invariance, factor sensitivity, rotational equivariance, and backpropagation.
+Not all historical test assets are included in this public snapshot.
 
-绘制训练曲线（在 `AdsDrift/plot` 目录下运行）：
+To plot training curves, run the following command from `AdsDrift/plot`:
 
 ```bash
 python plot_train.py /path/to/test_or_run_directory
 ```
 
-读取指定目录的 `metrics.jsonl`，只生成或更新同目录的 `training_dashboard.png`。六个面板依次为原始漂移损失 `mean(V²)`、模式吸引指标、归一化优化损失、结构位移、梯度与学习率、训练速度。默认使用 51 条记录的滑动中位数，可通过 `--window` 调整。若目录已有 `training_metrics_summary.json` 中的 oracle 位移统计，则显示参考线；否则省略参考线。不加载 checkpoint，也不修改统计文件。
+The script reads `metrics.jsonl` from the specified directory and creates or
+updates `training_dashboard.png` in the same directory. Its six panels show the
+raw drift loss `mean(V²)`, mode-attraction metrics, normalized optimization
+loss, structural displacement, gradients and learning rate, and training
+throughput. The default smoothing is a sliding median over 51 records and can
+be changed with `--window`. If `training_metrics_summary.json` contains oracle
+displacement statistics, the corresponding reference lines are shown.
+Otherwise, they are omitted. The plotting script does not load checkpoints or
+modify statistics files.
 
-训练的数据流为：
+The training data flow is:
 
 ```text
-条件 c + 随机噪声 ──初始化──> R0 ──Gθ──> 生成坐标 R̂
-                                          │
-                                      冻结 MACE φ
-                                          │
-                                     生成特征 φ(R̂)
-                                          │
-同体系低能终点 ──预先提取──> 正样本特征 ────┤
-                                          ↓
-                               联合距离与 Drifting 漂移场
-                                          ↓
-                         stop-gradient 特征目标与联合特征损失
-                                          ↓
-              一次 ∇R L → 平移/旋转/内部投影加权 → 更新生成器 θ
+condition c + random noise --initialization--> R0 --Gθ--> generated coordinates R_hat
+                                                       |
+                                                frozen MACE phi
+                                                       |
+                                            generated features phi(R_hat)
+                                                       |
+low-energy endpoints --pre-extraction--> positive features
+                                                       |
+                                           joint distance and drift field
+                                                       |
+                                 stop-gradient targets and joint feature loss
+                                                       |
+                   one dL/dR -> translation/rotation/internal weighting -> update θ
 ```
 
-`model.py` 中的 `AdsorptionDriftingObjective` 组合生成器、冻结特征编码器和漂移损失。
+`AdsorptionDriftingObjective` in `model.py` combines the generator, the frozen
+feature encoder, and the Drifting loss.
 `build_model(generator_config, drifting_config, coordinate_gradient_balancing_config)`
-接收生成器、漂移与梯度平衡参数，并自动加载包内固定的 MACE 编码器。
+accepts generator, Drifting, and gradient-balancing settings and loads the
+configured MACE encoder.
 
-共享联合核仍同时使用四个特征分支来计算样本权重与模式吸引场：
+The shared joint kernel uses four feature branches to compute sample weights
+and mode-attraction fields:
 
 $$
 \{h_{\rm ads}^{(0)},h_{\rm ads}^{(1)},
@@ -127,7 +151,8 @@ $$
 \longrightarrow (L_{\rm ads},L_{\rm surf}).
 $$
 
-随后只替换损失对坐标的 VJP：
+Only the vector-Jacobian product (VJP) from loss to coordinates is routed by
+branch:
 
 $$
 \frac{\partial L}{\partial R_i}=
@@ -138,101 +163,175 @@ $$
 \end{cases}
 $$
 
-实现只执行一次 MACE 前向；两个分支分别反向得到坐标 VJP，再通过数值等于
-原始 loss 的直通代理标量传给生成器。记录中额外保存两个分支 loss、两条被
-屏蔽交叉梯度的范数与比例。
+The implementation performs one MACE forward pass. The two branches obtain
+their coordinate VJPs separately and pass them to the generator through a
+straight-through proxy scalar whose numerical value equals the original loss.
+Logs additionally store both branch losses and the norms and ratios of the two
+masked cross-gradients.
 
-## 2. 条件、学习变量和张量形状
+## 2. Conditions, learned variables, and tensor shapes
 
-test_18 沿用 test_6，把条件写成构造因子的乘积，而不是不可拆分的“体系编号”：
+Following `test_6`, `test_18` expresses each condition as a product of
+construction factors rather than an indivisible system identifier:
 
 $$
-c=(S_{\rm prim},hkl,s_{\rm term},b,M,n_{\rm layer},v_{\rm vac},\varepsilon,A),
+c=(S_{\rm prim},hkl,s_{\rm term},b,M,n_{\rm layer},v_{\rm vac},\varepsilon,A).
 $$
 
-其中 $S_{\rm prim}=(Z_{\rm prim},F_{\rm prim},L_{\rm prim})$ 是标准原胞元素、分数坐标和晶格；$hkl$ 是相对于常规标准胞 $L_{\rm conv}$ 定义的约化 Miller 指数；$s_{\rm term}$ 与 $b$ 分别表示终止位移和上下表面；$M$ 是从原胞到取向、扩展后体相晶格的三维非奇异整数矩阵；其后依次为 slab 层数、真空、应变和吸附物身份。`condition_factors.json` 同时保存 $L_{\rm prim}$ 与 $L_{\rm conv}$，避免把常规胞误称为原胞，也避免在错误的倒易基底上解释 Miller 指数。这里“独立”表示这些变量在接口中可分别控制，并不假设它们在数据统计上相互独立。
+Here, $S_{\rm prim}=(Z_{\rm prim},F_{\rm prim},L_{\rm prim})$ contains the
+elements, fractional coordinates, and lattice of the standardized primitive
+cell. The reduced Miller index $hkl$ is defined relative to the standardized
+conventional cell $L_{\rm conv}$. The variables $s_{\rm term}$ and $b$ specify
+the termination shift and the selected surface side. $M$ is a nonsingular
+three-dimensional integer matrix mapping the primitive cell to the oriented,
+expanded bulk lattice. The remaining factors specify the slab-layer count,
+vacuum thickness, strain, and adsorbate identity. `condition_factors.json`
+stores both $L_{\rm prim}$ and $L_{\rm conv}$, preventing a conventional cell
+from being mislabeled as a primitive cell or a Miller index from being
+interpreted in the wrong reciprocal basis. "Factorized" means that these
+variables can be controlled separately through the interface; it does not
+assume statistical independence in the data.
 
-完整 slab 的 $(Z,t,L,R_0)$ 仍作为局部物理图输入，但不再承担全部条件表示：
+The complete slab $(Z,t,L,R_0)$ remains the local physical graph input, but it
+no longer carries the entire condition representation:
 
 $$
 c\xrightarrow{\text{surface construction}}S_{\rm slab},\qquad
 (S_{\rm slab},R_0,c)\xrightarrow{G_\theta}\widehat R.
 $$
 
-模型当前仍只生成位置、朝向和表面弛豫，不生成元素、原胞、Miller 指数或超胞矩阵；这些是推理时给定、将来可组合扫描的条件。
+The current model generates positions, orientations, and surface relaxation.
+It does not generate elements, primitive cells, Miller indices, or supercell
+matrices. These conditions are supplied at inference time and may be scanned
+compositionally in future work.
 
-| 输入 | 形状 | 含义 |
+| Input | Shape | Meaning |
 | --- | --- | --- |
-| `atomic_numbers` | [B,N] | 各原子的原子序数 |
-| `roles` | [B,N] | padding=0、固定层=1、可移动层=2、吸附物=3 |
-| `atom_mask` | [B,N] | 有效原子位置 |
-| `cell` | [B,3,3] | 完整晶胞向量，单位 Å |
-| `r0_positions` | [B,G,N,3] | 每个条件的 G 个随机初始结构，单位 Å |
+| `atomic_numbers` | [B,N] | Atomic number of each atom |
+| `roles` | [B,N] | padding=0, fixed=1, movable surface=2, adsorbate=3 |
+| `atom_mask` | [B,N] | Valid-atom mask |
+| `cell` | [B,3,3] | Full cell vectors in Å |
+| `r0_positions` | [B,G,N,3] | G random initial structures per condition, in Å |
 
-每个体系目录还必须有 `condition_factors.json`，显式保存原胞、晶面、终止、超胞矩阵、层数、真空、应变和吸附物元素序列。字段示例见 `data/condition_factors.example.json`。旧数据缺少该文件会立即报错；test_18 不从最终 slab 反推这些变量，因为这种反推对重构、合金和不同终止通常不唯一。
+Each system directory must also contain `condition_factors.json`, which
+explicitly records the primitive cell, facet, termination, supercell matrix,
+layer count, vacuum, strain, and adsorbate element sequence. See
+`data/condition_factors.example.json` for an example. Legacy data without this
+file fail immediately. `test_18` does not infer these variables from the final
+slab because the inverse mapping is generally non-unique for reconstructions,
+alloys, and distinct terminations.
 
-OC20 的 tag 0/1/2 分别映射为内部 role 1/2/3。当前训练加载器规定 B=1，G 默认100，可在 YAML 中设置。
+OC20 tags 0, 1, and 2 map to internal roles 1, 2, and 3, respectively. The
+current training loader requires B=1. G defaults to 100 and is configurable in
+YAML.
 
-生成器内部将 B 和 G 合并成 B×G 个独立结构。注意力发生在每个结构的原子之间，100个候选不会在生成器内部互相注意；它们在后面的漂移损失中共同参与分布比较。
+The generator merges B and G into B×G independent structures. Attention occurs
+between atoms within each structure. The 100 candidates do not attend to one
+another inside the generator, but they jointly participate in the downstream
+distribution comparison used by the Drifting loss.
 
-## 3. 随机初始化 R0
+## 3. Random initialization R0
 
-初始化读取参考轨迹的第0帧。参考表面的所有原子保持原位，吸附物整体平移和旋转，得到覆盖晶面的有效初始结构。
+Initialization reads frame 0 of a reference trajectory. All reference-surface
+atoms remain fixed at their input positions, while the adsorbate is translated
+and rotated as a rigid body to produce valid initial structures that cover the
+surface.
 
-每个候选使用七维高斯提议噪声：
+Each candidate uses a seven-dimensional Gaussian proposal:
 
 $$
 z\sim\mathcal N(0,I_7),\qquad u_k=\Phi(z_k),\quad k=1,2,3.
 $$
 
-前三维经高斯累积分布函数变成均匀变量，用于晶面内分数坐标和吸附高度。默认采用等面积分层：G=100时覆盖10×10区域，每个区域接受一个随机位点；高度用100个分层区间，并随机分配给横向区域。高度范围默认1.2–3.0 Å，定义为吸附物最低原子减去表面最高原子的法向高度。
+The first three components are mapped through the Gaussian cumulative
+distribution function to uniform variables for in-plane fractional coordinates
+and adsorption height. By default, equal-area stratification divides G=100
+samples across a 10×10 grid, with one accepted site per stratum. Adsorption
+height is divided into 100 strata and randomly assigned to the lateral strata.
+The default height range is 1.2–3.0 Å, measured along the surface normal from
+the highest surface atom to the lowest adsorbate atom.
 
-后四维归一化为单位四元数，产生均匀 SO(3) 旋转。初始化保持分子内部相对构象，仅随机化整体朝向；单原子吸附物不受旋转影响。目前没有额外采样分子扭转角。
+The remaining four components are normalized to a unit quaternion, producing a
+uniform SO(3) rotation. Initialization preserves the adsorbate's internal
+relative geometry and randomizes only its global orientation. Rotation has no
+effect on a single-atom adsorbate. Molecular torsions are not sampled
+separately.
 
-采样还检查跨周期接触、真空间距和横向去重，默认最小横向间距为0.1 Å。经过分层和拒绝采样后，最终 R0 是受几何约束的分布，不是独立高斯原子坐标。
+Sampling also checks contacts across periodic boundaries, vacuum clearance,
+and lateral deduplication. The default minimum lateral separation is 0.1 Å.
+After stratification and rejection sampling, R0 is a geometrically constrained
+distribution rather than a collection of independent Gaussian atomic
+coordinates.
 
-`r0_resampling.py` 根据体系 ID、基础随机种子和 epoch 生成确定性新种子，从保存的参考结构与采样元数据重建 R0。它校验参考文件哈希、原子顺序和晶胞。在线模式下每轮得到新的100个输入，便于学习对新初始化的映射。
+`r0_resampling.py` derives deterministic seeds from the system identifier,
+base random seed, and epoch, then rebuilds R0 from the saved reference structure
+and sampling metadata. It validates the reference-file hash, atom order, and
+cell. Online mode produces 100 new inputs per epoch, enabling the model to learn
+the mapping from previously unseen initializations.
 
-## 4. 生成器 Gθ
+## 4. Generator Gθ
 
-完整逐步公式、局部边定义和输出约束见 [生成器详细 README](model/generator/README.md)。
+See the [generator README](model/generator/README.md) for the full equations,
+local-edge definitions, and output constraints.
 
-### 4.1 SO(3) 原子表示
+### 4.1 SO(3) atomic representations
 
-每个节点保存从 $l=0$ 到 $l=l_{\max}$ 的不可约表示：
+Each node stores irreducible representations from $l=0$ through
+$l=l_{\max}$:
 
 $$
 X_i\in\mathbb R^{(l_{\max}+1)^2\times C},\qquad
 X_{i,0,:}=E_Z(Z_i)+E_{\mathrm{role}}(t_i)+B_{t_i}(c).
 $$
 
-初始化还叠加由全原子统一周期图的距离径向基和 Wigner-D 旋转生成的几何边嵌入，包括其标量分量。此初始化沿用旧版，因此第一层前仍含有界面几何信息，本版不隔离初始化。网络不嵌入绝对笛卡尔坐标，因此整体平移不改变预测位移。
+Initialization also adds geometric edge embeddings generated from radial
+distance bases and Wigner-D rotations on a unified all-atom periodic graph,
+including the scalar components. This behavior is retained from the earlier
+implementation, so interface geometry is present before the first layer. The
+network does not embed absolute Cartesian coordinates; global translation
+therefore does not change the predicted displacements.
 
-### 4.2 三分支局部等变块
+### 4.2 Three-branch local equivariant blocks
 
-每层包含三套不共享参数的 EquiformerV3 注意力：
+Each layer contains three parameter-distinct EquiformerV3 attention paths:
 
 ```text
-完整 slab ──K/V──> 完整 slab 查询         （slab self-attention）
-吸附物     ──K/V──> 吸附物查询             （adsorbate self-attention）
-完整 slab  ──K/V──> 吸附物查询 ─┐
-吸附物     ──K/V──> 完整 slab 查询 ─┴──   （共享的 interface cross-attention）
+full slab --K/V--> full-slab queries            (slab self-attention)
+adsorbate --K/V--> adsorbate queries            (adsorbate self-attention)
+full slab --K/V--> adsorbate queries --+
+adsorbate --K/V--> full-slab queries   --+--     (shared interface cross-attention)
 ```
 
-固定层同时作为 query、key/value，所有有效原子都参与 attention 和 FFN 特征残差更新，padding 不更新。更新后的固定层特征继续传入下一层；其坐标仍由输出掩码固定。四层均使用平滑半径截断、SO(2) 图注意力、Wigner-D 旋转及 SwiGLU-$S^2$ 前馈层。默认 $C=128$、$l_{\max}=3$、$m_{\max}=2$；计算只发生在半径截断后的周期边上，不再进行全局 $N^2$ 注意力，也暂不加入全局模式路由。每层只在 $l=0$ 标量通道施加按 fixed/surface/adsorbate 区分的 FiLM 条件调制，因此不改变高阶张量的旋转规则。
+Fixed-layer atoms act as queries, keys, and values. Every valid atom participates
+in attention and FFN residual updates, while padding does not. Updated
+fixed-layer features continue into the next layer, but their coordinates remain
+fixed by the output mask. All four layers use smooth radial cutoffs, SO(2) graph
+attention, Wigner-D rotations, and SwiGLU-$S^2$ feed-forward layers. The default
+settings are $C=128$, $l_{\max}=3$, and $m_{\max}=2$. Computation is restricted
+to periodic edges within the relation-specific cutoffs; there is no global
+$N^2$ attention or global mode-routing mechanism. Role-specific FiLM
+conditioning for fixed, movable-surface, and adsorbate atoms is applied only to
+the $l=0$ scalar channels, preserving the rotation rules of higher-order
+tensors.
 
-同一层内先并行计算 SS 和 AA，再完成其残差更新，之后重新归一化并施加已有 FiLM，供 SA 读取。最后更新 SA 残差，再计算 FFN。两次注意力归一化共享同一组已有参数；SS、AA、SA 各自的残差系数仍为 $1/\sqrt2$。因此参数数量、初始化权重、邻居图和单次坐标读出均不变，只有特征更新顺序改变。
+Within each layer, SS and AA are computed in parallel and applied as residual
+updates. The updated features are normalized again and passed through the
+existing FiLM transformation before SA reads them. The SA residual is applied
+before the FFN. Both attention normalization steps share the existing
+parameters, and the SS, AA, and SA residual coefficients remain
+$1/\sqrt2$. Parameter counts, initialization weights, neighbor graphs, and the
+single coordinate readout are unchanged; only the feature-update order differs.
 
-### 4.3 三个几何输出头
+### 4.3 Three geometric output heads
 
-| 原子部分 | 输出 | 约束 |
+| Atomic subset | Output | Constraint |
 | --- | --- | --- |
-| 固定层 | 原输入坐标 | 完全不移动 |
-| 可移动表面层 | 每原子三维残差 | 从该原子的 $l=1$ 特征读取，尺度0.5 Å |
-| 吸附物整体 | 一个三维中心位移 | 吸附物 $l=1$ 输出均值，尺度3 Å |
-| 吸附物内部 | 每原子三维残差 | 减去残差均值，尺度1 Å |
+| Fixed layer | Input coordinates | No movement |
+| Movable surface | Per-atom 3D residual | Read from each atom's $l=1$ features; scale 0.5 Å |
+| Adsorbate as a whole | One 3D center displacement | Mean adsorbate $l=1$ output; scale 3 Å |
+| Adsorbate internal geometry | Per-atom 3D residual | Mean residual removed; scale 1 Å |
 
-对吸附物，输出可以写为：
+For adsorbate atoms, the output is
 
 $$
 \hat R_i=\operatorname{wrap}_{ab}(\bar R_0+\Delta c)
@@ -240,34 +339,64 @@ $$
 \qquad\sum_{i\in\mathrm{ads}}\Delta r_i=0.
 $$
 
-只把分子中心包裹回晶面内的周期晶胞，保持分子连续，不对每个原子单独包裹。中心位移和内部位移分开，避免重复表达整体平移自由度。上述尺度是输出乘数，不是硬性位移上限。
+Only the molecular center is wrapped into the in-plane periodic cell. Individual
+atoms are not wrapped, preserving molecular continuity across cell boundaries.
+Center and internal displacements are separated to avoid duplicating the
+global translational degree of freedom. The listed scales are output
+multipliers, not hard displacement limits.
 
-三个输出头只在通道维做共享线性投影，不混合 $l=1$ 的三个空间分量，因此坐标残差随结构共同旋转。输出头零初始化：初始输出等于 R0 的周期等价表示。单原子吸附物的内部残差恒为零。生成器一次前向就产生最终候选坐标；训练完成后只生成结构时，不需要运行 MACE。
+The three output heads use shared linear projections only along the channel
+dimension and do not mix the three spatial components of $l=1$. Coordinate
+residuals therefore rotate with the structure. The output heads are initialized
+to zero, so the initial output is the periodic equivalent of R0. The internal
+residual of a single-atom adsorbate is always zero. One generator forward pass
+produces the final candidate coordinates. MACE is not required for
+generator-only structure generation after training.
 
-## 5. 冻结 MACE 特征空间
+## 5. Frozen MACE feature space
 
-训练用 MACE-MH-1，head 为 `oc20_usemppbe`。读取两个 interaction 的512通道特征。底层网络参数冻结并保持 eval 模式；生成坐标到特征的计算图保留，使梯度可以传回生成器。
+Training uses MACE-MH-1 with the `oc20_usemppbe` head. The model reads
+512-channel features from both interaction layers. MACE parameters remain
+frozen and the encoder stays in evaluation mode, while the graph from generated
+coordinates to features remains differentiable so that gradients can propagate
+back into the generator.
 
-| 特征分支 | 单结构形状 | 读取方式 |
+| Feature branch | Per-structure shape | Readout |
 | --- | --- | --- |
-| `scalar_ads` | [4,512] | 两层吸附物标量的均值和标准差 |
-| `message_l1_ads` | [4,512] | 两层 l=1 消息模长的均值和标准差 |
-| `scalar_movable` | [2,M,512] | 两层可移动表面原子的标量，保留原子身份 |
-| `message_l1_movable` | [2,M,512] | 两层可移动表面原子的 l=1 消息模长 |
+| `scalar_ads` | [4,512] | Adsorbate scalar mean and standard deviation from two layers |
+| `message_l1_ads` | [4,512] | Mean and standard deviation of adsorbate l=1 message magnitudes from two layers |
+| `scalar_movable` | [2,M,512] | Movable-surface scalar features from two layers, preserving atom identity |
+| `message_l1_movable` | [2,M,512] | Movable-surface l=1 message magnitudes from two layers |
 
-M 为可移动表面原子数。l=1 处理使用三个分量的欧氏范数，当前没有保留其完整方向向量。吸附物通过统计池化形成固定尺寸表示，可移动层按体系内固定原子顺序保留特征。
+M is the number of movable surface atoms. The $l=1$ readout uses the Euclidean
+norm of the three components and currently does not retain the full directional
+vector. Statistical pooling gives the adsorbate a fixed-size representation,
+whereas movable-layer features preserve the fixed within-system atom order.
 
-损失最多使用4+4+2+2=12组特征。单原子吸附物的标准差组退化，当前会按特征尺度阈值跳过；此前单 O 体系实际使用8组。固定层虽没有独立的损失读出，其原子仍在 MACE 图和生成器中提供环境信息。
+The loss uses at most 4+4+2+2=12 feature groups. Standard-deviation groups
+degenerate for single-atom adsorbates and are skipped when they fall below the
+feature-scale threshold. The earlier single-O system used eight groups in
+practice. Fixed-layer atoms have no separate loss readout, but still provide
+environmental context in the MACE and generator graphs.
 
-正样本特征由数据制备阶段预先保存；生成样本特征每步在线计算。所有正样本分支必须对应同一个终点索引，避免混合不同构型的吸附物与表面特征。
+Positive-sample features are precomputed during data preparation. Generated
+sample features are computed online at every step. All positive branches must
+refer to the same endpoint index, preventing the adsorbate and surface features
+of different configurations from being mixed.
 
-## 6. Drifting 损失
+## 6. Drifting loss
 
-每个体系独立计算：生成样本为负样本集合，正样本来自相同体系的低能终点。不同催化体系之间不做正负样本匹配。
+Each system is evaluated independently. Generated samples form the negative
+set, and positive samples are low-energy endpoints from the same system.
+Positive and negative samples are not matched across different catalyst
+systems.
 
-### 6.1 联合距离
+### 6.1 Joint distance
 
-第 g 组特征按本批生成/正样本的平均距离估计尺度 s_g，再除以通道数平方根，使各组对联合距离具有可比权重：
+For feature group $g$, the scale $s_g$ is estimated from the mean
+generated-to-positive distance in the current batch. Each group is also divided
+by the square root of its channel count so that groups contribute comparably to
+the joint distance:
 
 $$
 \tilde f_g=f_g/s_g,\qquad
@@ -275,11 +404,16 @@ j=\frac{1}{\sqrt Q}\operatorname{concat}_g
        \left(\tilde f_g/\sqrt{d_g}\right).
 $$
 
-Q 为有效特征组数，d_g 为该组展平后的维度。尺度和联合核权重停止梯度；生成特征本身仍参与反向传播。多个可移动原子带来的维度增加不会直接按通道数放大其权重。
+Q is the number of valid feature groups, and $d_g$ is the flattened dimension
+of group $g$. Gradients through the feature scales and joint-kernel weights are
+stopped, while gradients through the generated features are retained. The
+larger dimension associated with multiple movable atoms therefore does not
+automatically increase a group's weight in proportion to its channel count.
 
-### 6.2 吸引与排斥
+### 6.2 Attraction and repulsion
 
-对每个温度 τ，用联合特征的欧氏距离构建 logits：
+At each temperature $\tau$, logits are constructed from Euclidean distances in
+the joint feature space:
 
 $$
 \ell_{ij}=-\|j_i-j_j\|_2/\tau,\qquad
@@ -287,17 +421,23 @@ A_{ij}=\sqrt{\operatorname{softmax}_{\rm row}(\ell)_{ij}
                   \operatorname{softmax}_{\rm col}(\ell)_{ij}}.
 $$
 
-列集合包含正样本和生成样本，生成样本对自身的负样本权重设为零。权重经过正负质量交叉归一化，得到共享的 W⁺、W⁻；每组使用同一套权重计算：
+The columns contain both positive and generated samples. The negative
+self-weight of each generated sample is set to zero. Cross-normalization of
+positive and negative mass yields shared $W^+$ and $W^-$, which are then used
+for every feature group:
 
 $$
 V_g^{(\tau)}=W^+\tilde F_g^+-W^-\tilde F_g^-.
 $$
 
-正样本提供吸引，其他生成样本提供排斥。排斥可以帮助维持多样性，但不能保证有限训练中每个模式都有相同生成频率。
+Positive samples provide attraction, and other generated samples provide
+repulsion. Repulsion can help preserve diversity, but finite training does not
+guarantee equal generation frequency for every mode.
 
-### 6.3 实际优化目标与日志
+### 6.3 Optimization objective and logging
 
-各温度漂移场先按自身 RMS 归一化，再相加构造停止梯度的目标：
+The drift field at each temperature is normalized by its own RMS before the
+fields are summed to construct a stop-gradient target:
 
 $$
 T_g=\operatorname{sg}\!\left(\tilde F_g^-
@@ -306,51 +446,76 @@ T_g=\operatorname{sg}\!\left(\tilde F_g^-
 L=\sum_g\operatorname{mean}\!\left[(\tilde F_g^--T_g)^2\right].
 $$
 
-用于观察收敛的 `raw_drift_loss` 是漂移 RMS 归一化之前的
-\(\operatorname{mean}(V^2)\)，再对特征组和温度取平均；这里的 V 已在经过特征尺度归一化的空间中计算。
-`loss` 是上述归一化后的优化目标，两条曲线的量级和走势不必一致。
+`raw_drift_loss`, used to monitor convergence, is
+$\operatorname{mean}(V^2)$ before drift RMS normalization, averaged over
+feature groups and temperatures. Here, V is computed in the feature-scale
+normalized space. `loss` is the normalized optimization objective above, so
+the two curves need not have the same scale or trend.
 
-三档无量纲核温度直接由 YAML 的 `drifting.temperatures: [0.02, 0.05, 0.2]` 设置，采用归档报告记录的数据集标定结果；训练不再读取 `temperature_calibration.json`，也不再使用 `temperatures: auto`。整个目标不包含直接的坐标配对监督、能量 MAE 或力 MAE。
+The three dimensionless kernel temperatures are set directly in YAML as
+`drifting.temperatures: [0.02, 0.05, 0.2]`, following the dataset calibration
+recorded in the archived development report. Training no longer reads
+`temperature_calibration.json` or supports `temperatures: auto`. The objective
+contains no direct paired-coordinate supervision, energy MAE, or force MAE.
 
-### 6.4 吸附物坐标梯度投影与加权
+### 6.4 Adsorbate coordinate-gradient projection and weighting
 
-联合特征损失仍包含吸附物与表面的全部交叉作用，但先只对隔离坐标叶节点
-求一次 MACE 坐标 VJP：
+The joint feature loss retains all adsorbate-surface interactions but first
+computes one MACE coordinate VJP with respect to isolated coordinate leaf
+tensors:
 
 $$
 g=\partial_R(L_{\rm ads}+L_{\rm surf}).
 $$
 
-吸附物梯度正交分解为平移、无穷小刚体旋转和内部形变：
+The adsorbate gradient is decomposed orthogonally into translation,
+infinitesimal rigid-body rotation, and internal deformation:
 
 $$
 g_{\rm ads}=g_t+g_r+g_i.
 $$
 
-默认YAML梯度能量比例为平移20%、旋转20%、内部形变60%。每个非退化
-分量按自身范数重标度，组合后保持该候选原始MACE吸附物梯度总能量；
-表面梯度不变。
-加权场停止梯度并通过线性代理损失送入生成器，因此只需要一次 MACE 一阶
-坐标梯度，不计算 Hessian。启动记录使用
-`coordinate_gradient_routing=mace_projected_balanced_first_order`，日志
-`coordinate_routing_enabled=1`，并保存加权前后的分量比例与缩放倍数。
+The default YAML allocation assigns 20% of gradient energy to translation, 20%
+to rotation, and 60% to internal deformation. Each nondegenerate component is
+rescaled by its own norm, and the combined field preserves the total energy of
+the candidate's original MACE adsorbate gradient. Surface gradients are left
+unchanged.
 
-## 7. 训练数据与采样单位
+The weighted field is detached and passed to the generator through a linear
+proxy loss. Only one first-order MACE coordinate gradient is required; no
+Hessian is computed. Startup logs report
+`coordinate_gradient_routing=mace_projected_balanced_first_order`, set
+`coordinate_routing_enabled=1`, and record component ratios and scale factors
+before and after weighting.
 
-完整预处理数据未包含在本仓库中。原开发环境使用的数据布局为：
+## 7. Training data and sampling unit
+
+The complete preprocessed dataset is not included in this repository. The
+original development environment used the following layout:
 
 ```text
 dataset/drift_oc20dense_0p50eV_v1
 ```
 
-该版本从973个审计体系选出905个至少有两个低能模式的体系，包含15,207个模式、31,147个终点及90,500个预生成 R0。筛选窗口为各体系接受终点中观测最低能量以上0.50 eV，模式定义为审计结果中的 `symmetry_rmsd_0.1A`。
+This version selected 905 systems with at least two low-energy modes from 973
+audited systems. It contains 15,207 modes, 31,147 endpoints, and 90,500
+pregenerated R0 structures. The acceptance window is 0.50 eV above the lowest
+observed accepted endpoint within each system. Modes are defined by the audit's
+`symmetry_rmsd_0.1A` clustering key.
 
-每个 batch 仅使用一个体系，默认生成100个候选。每个 epoch 随机遍历全部已配置体系一次，因此完整905体系配置为905个 batch/epoch，单体系配置为1个 batch/epoch。
+Each batch contains one system and generates 100 candidates by default. Each
+epoch visits every configured system once in random order. A full 905-system
+configuration therefore has 905 batches per epoch, whereas a single-system
+configuration has one batch per epoch.
 
-默认每个模式抽一个终点，模式内有多个成员时随机选择成员；所有四个特征分支使用相同的抽样索引。
-这让训练中的正样本模式具有均等采样机会，但生成频率不是热力学占据概率。当前目标是覆盖各低能模式，不要求输出数量严格均分。
+By default, one endpoint is sampled from each mode. If a mode has multiple
+members, one member is chosen randomly. All four feature branches use the same
+sampled endpoint indices. Positive modes therefore have equal sampling
+opportunity during training, but generation frequencies are not thermodynamic
+occupancies. The objective is to cover the low-energy modes, not to produce
+exactly equal output counts.
 
-在线重采样需在单卡配置中显式开启：
+Online resampling must be enabled explicitly in single-GPU configurations:
 
 ```yaml
 data:
@@ -364,11 +529,15 @@ data:
     max_bank_retries: 4
 ```
 
-三份固定训练配置均已开启这段设置；若关闭，则使用数据集缓存的 R0。当前多卡运行器沿用固定 R0 的分片实现，在线重采样路径在单卡运行器中。
+The fixed training configurations enable this option. If disabled, training
+uses the R0 structures cached in the dataset. The current multi-GPU runner
+retains the sharded fixed-R0 implementation; online resampling is implemented
+in the single-GPU runner.
 
-## 8. 数据制备入口
+## 8. Data preparation
 
-在原有结构/特征 bank 完成后，还需为每个体系写入可信构造因子。例如：
+After constructing the structure and feature banks, each system must be given
+trusted construction factors. For example:
 
 ```bash
 python -m AdsDrift.data.prepare_condition_factors \
@@ -380,20 +549,34 @@ python -m AdsDrift.data.prepare_condition_factors \
   --slab-layers 4 --vacuum 15
 ```
 
-原胞、终止位移和超胞矩阵必须来自数据生成记录或可信来源，不能用最终 slab 的外观猜测。脚本会检查原胞周期性、Miller 指数、整数矩阵和吸附物原子顺序。
+The primitive cell, termination shift, and supercell matrix must come from the
+data-generation record or another trusted source. They cannot be inferred
+reliably from the appearance of the final slab. The script validates primitive
+cell periodicity, the Miller index, the integer matrix, and adsorbate atom order.
 
-`data/prepare_dataset.py` 已合并原来的三个数据脚本。其子命令可以独立执行：
+`data/prepare_dataset.py` consolidates three historical data scripts. Its
+subcommands can be run independently:
 
-| 子命令 | 作用 | 主要输入 |
+| Subcommand | Purpose | Main inputs |
 | --- | --- | --- |
-| `index` | 生成体系索引、种子和计数 | audit-root、trajectory-root、tag-mapping |
-| `trajectories` | 每个模式复制一条完整代表轨迹及干净表面 | audit-root、trajectory-root、mapping-root |
-| `positives` | 单体系每个模式导出一个代表终帧 | system-dir、audit-json、tag-mapping |
+| `index` | Generate system indices, seeds, and counts | audit-root, trajectory-root, tag-mapping |
+| `trajectories` | Copy one representative full trajectory and clean surface per mode | audit-root, trajectory-root, mapping-root |
+| `positives` | Export one representative final frame per mode for one system | system-dir, audit-json, tag-mapping |
 
-公共参数 `--window-ev` 默认0.5，`--cluster-key` 默认上述对称性聚类键。接受旧拼写 `--window` 与 `--window-eV`。
-`index` 可用 `--expected-systems 905` 检查全量计数；`trajectories` 可用 `--expected-samples 15274` 检查代表轨迹总数。对子集省略这些检查。
+The shared `--window-ev` option defaults to 0.5, and `--cluster-key` defaults to
+the symmetry-clustering key above. The legacy spellings `--window` and
+`--window-eV` are also accepted. `index` accepts `--expected-systems 905` to
+validate the full system count, while `trajectories` accepts
+`--expected-samples 15274` to validate the representative-trajectory count.
+Omit these checks for subsets.
 
-`index` 仅建立索引，manifest 保持 `complete: false`；它不生成 R0 或提取 MACE 特征。代表终点导出也不展开所有模式成员。完整训练 bank 仍需初始化及特征制备步骤。本仓库包含 `model/initialize/` 中的初始化工具；历史实验目录和未整理的特征导出脚本没有纳入本次开源快照。
+`index` only constructs the index and leaves `complete: false` in the manifest.
+It does not generate R0 or extract MACE features. Representative-endpoint
+export also does not expand every mode member. A complete training bank still
+requires initialization and feature preparation. This repository contains the
+initialization utilities in `model/initialize/`; historical experiment
+directories and uncurated feature-export scripts are not part of this public
+snapshot.
 
 ```bash
 python model/AdsDrift/data/prepare_dataset.py index \
@@ -410,13 +593,18 @@ python model/AdsDrift/data/prepare_dataset.py positives \
   --output-dir model/AdsDrift/data/positive_0p50eV
 ```
 
-索引和终点导出拒绝覆盖已有结果。原始轨迹导出支持相同输入配置下续跑；冲突配置及同尺寸但内容不同的文件会报错。
+Indexing and endpoint export refuse to overwrite existing results. Original
+trajectory export can resume when invoked with the same input configuration;
+it rejects conflicting configurations and same-size files with different
+contents.
 
-## 9. 运行方式
+## 9. Installation and usage
 
-顶层 Python 包名为 `AdsDrift`，内部导入统一使用 `from AdsDrift... import ...`。
+The top-level Python package is named `AdsDrift`, and internal imports use
+`from AdsDrift... import ...`.
 
-克隆仓库后，先安装依赖，并把仓库的父目录加入 Python 搜索路径：
+Clone the repository, install its dependencies, and add the repository's parent
+directory to the Python search path:
 
 ```bash
 git clone https://github.com/Prome-theus1/AdsDrift.git
@@ -427,51 +615,92 @@ pip install -r requirements.txt
 export PYTHONPATH="$(dirname "$PWD")${PYTHONPATH:+:$PYTHONPATH}"
 ```
 
-之后可在仓库父目录使用 `python -m AdsDrift...`；配置参数需指向实际配置文件。模型文件和数据文件的相对路径以运行时工作目录解析。GPU 训练通常需要先按目标 CUDA 环境安装匹配的 PyTorch，再安装其余依赖。
+You can then run `python -m AdsDrift...` from the parent directory. Configuration
+arguments must point to the actual files. Relative model and data paths are
+resolved from the runtime working directory. For GPU training, install the
+PyTorch build matching the target CUDA environment before installing the other
+dependencies.
 
 ```bash
-# 统一入口
+# Unified entry point
 python -m AdsDrift.model.model --help
 
-# 单卡训练（需要数据集与冻结 MACE 权重）
+# Single-GPU training; requires the dataset and frozen MACE weights
 python -m AdsDrift.model.model train \
   --config AdsDrift/config/train_single_0_1190_0.yaml
 
-# 多卡训练
+# Multi-GPU training
 torchrun --nproc_per_node=2 -m AdsDrift.model.model train-distributed \
   --config AdsDrift/config/train_single_0_1190_0.yaml
 
-# 已有条件 bank 的一步生成
+# One-pass generation from an existing condition bank
 python -m AdsDrift.model.model sample \
   --checkpoint /path/to/epoch_5000.pt \
   --system-directory dataset/drift_oc20dense_0p50eV_v1/systems/0_1190_0 \
   --output-directory model/AdsDrift/runs/inference_0_1190_0
 
-# 默认本地示例的随机初始化
+# Random initialization with the default local example
 python -m AdsDrift.model.initialize.generate_random_inputs --num-samples 100
 
-# 结构转换的参数帮助
+# Structure-conversion help
 python -m AdsDrift.model.initialize.inputs_to_structures --help
 ```
 
-`model/model.py` 也支持直接文件执行。单卡训练、分布式训练和采样的全部参数由对应子命令的 `--help` 给出。
-当前 `sample` 命令复用完整条件 bank 加载器，因此其输入目录仍要求正样本元数据与特征文件齐全，虽然生成器前向本身不使用这些正样本。
+`model/model.py` can also be executed directly. The `--help` output of each
+subcommand documents the full single-GPU training, distributed training, and
+sampling interfaces.
 
-训练相对路径以运行时工作目录解析。MACE 权重不随仓库分发；默认兼容路径为 `model/drifting/mace_pt/macemh1model.pt`，也可设置 `ADSDRIFT_MACE_CHECKPOINT=/path/to/mace-mh-1.model`。head、SHA256、microbatch=8、activation checkpointing 和数值阈值统一由代码中的 `MACEFeatureConfig` 管理。checkpoint 会记录实际 MACE 配置以便追溯。
+The current `sample` command reuses the complete condition-bank loader, so its
+input directory still requires positive-sample metadata and feature files even
+though the generator forward pass itself does not consume the positive samples.
 
-运行结果输出到
-`training.run_directory` 指定的目录，默认 `model/AdsDrift/runs/production`；`--run-directory` 可覆盖该设置。不再使用 `paths.run_directory`。默认配置使用TF32、MACE microbatch=8和activation checkpointing。
+Training paths are resolved from the runtime working directory. MACE weights
+are not distributed with this repository. The compatibility default is
+`model/drifting/mace_pt/macemh1model.pt`; alternatively, set
+`ADSDRIFT_MACE_CHECKPOINT=/path/to/mace-mh-1.model`. The head, SHA256 checksum,
+microbatch size of 8, activation checkpointing, and numerical thresholds are
+defined centrally by `MACEFeatureConfig`. Training checkpoints record the
+effective MACE configuration for provenance.
 
-本次整理保持生成器参数名称、张量形状与保存的 `generator` state dict 格式不变，已有 checkpoint 可由新路径的生成器加载；历史配置里的旧文件路径需要指向实际位置。
+Outputs are written to `training.run_directory`, which defaults to
+`model/AdsDrift/runs/production`; `--run-directory` overrides it. The deprecated
+`paths.run_directory` setting is no longer used. Default configurations enable
+TF32, a MACE microbatch size of 8, and activation checkpointing.
 
-学习率预热使用 `training.warmup_epochs`，默认 10，设为 0 可关闭预热。内部按 `warmup_epochs × 每个 epoch 的优化步数` 换算；当前每个体系对应一次更新，所以优化步数为体系数量。单卡与多卡均采用此规则，多卡不再除以卡数。预热之后仍使用原有余弦衰减；若总训练轮数不超过预热轮数，则全程处于预热阶段。旧配置的 `warmup_steps` 应替换为 `warmup_epochs`。
+The public snapshot preserves generator parameter names, tensor shapes, and the
+saved `generator` state-dict format. Existing checkpoints can therefore load
+the generator from its new location, although legacy configuration paths must
+be updated.
 
-## 10. 验证与当前边界
+Learning-rate warmup is controlled by `training.warmup_epochs`, which defaults
+to 10 and can be disabled with 0. Internally, the duration is
+`warmup_epochs × optimization steps per epoch`. Each system contributes one
+update, so the number of optimization steps equals the number of systems. The
+same rule is used for single- and multi-GPU training and is not divided by the
+GPU count. Cosine decay follows warmup. If the total number of epochs does not
+exceed the warmup duration, the entire run remains in warmup. Replace the
+legacy `warmup_steps` option with `warmup_epochs`.
 
-历史实验依据和部分复现材料不在本次开源快照中。仓库保留当前模型实现、配置与数据制备入口；新的维护者应优先补充可公开的小型测试数据和端到端复现流程。
+## 10. Validation status and current limitations
 
-输出分布接近参考终点，并不意味着生成器已给出严格驻点或数学上的全局最低能结构。验证还需要关注可移动表面误差、碰撞、残余力、能量及未见体系表现。能量和力的独立验证属于后续评估；当前训练阶段仅优化上述冻结特征空间的分布目标。
+Some historical experimental evidence and reproduction materials are not part
+of this public snapshot. The repository retains the current model
+implementation, configurations, and data-preparation entry points. A priority
+for future maintainers is to add a small redistributable test dataset and an
+end-to-end reproduction workflow.
 
-## 许可证
+A generated distribution that approaches the reference endpoints does not
+imply that every generated structure is a strict stationary point or a
+mathematical global minimum. Validation should also examine movable-surface
+errors, collisions, residual forces, energies, and performance on unseen
+systems. Independent energy and force validation remains future work. The
+current training stage optimizes only the distribution objective in the frozen
+feature space described above.
 
-AdsDrift 原创代码按 [Apache License 2.0](LICENSE) 许可。仓库内由 EquiformerV3、FAIR Chemistry 和 e3nn 改编的部分仍保留其 MIT 许可与署名，详见 [NOTICE](NOTICE) 和 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。外部模型权重和数据不受本仓库许可证覆盖。
+## License
+
+Original AdsDrift code is licensed under the
+[Apache License 2.0](LICENSE). Components adapted from EquiformerV3, FAIR
+Chemistry, and e3nn retain their MIT licenses and attribution; see
+[NOTICE](NOTICE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). External
+model weights and datasets are not covered by this repository's license.

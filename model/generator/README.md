@@ -1,32 +1,51 @@
-# AdsDrift EquiformerV3 局部等变生成器
+# AdsDrift EquiformerV3 Local Equivariant Generator
 
-本目录是 `test_18` 生成器，继承 `test_16`，只将块内聚合改为“自注意力残差 → 交叉注意力残差 → FFN”。初始化与参数数量不变。固定层继续作为 query/key/value 并更新特征；其坐标仍固定。模型入口为 `generator.py`；构造条件协议和编码器位于相邻的 `../condition/`。从 EquiformerV3 固定下来的底层算子整理在 `core/`。
+This directory contains the historical `test_18` generator. It inherits from
+`test_16` and changes only the within-block aggregation order to
+"self-attention residuals, then cross-attention residuals, then FFN."
+Initialization and the parameter count are unchanged. Fixed-layer atoms remain
+queries, keys, and values and their features are updated, but their coordinates
+stay fixed. The model entry point is `generator.py`. The factorized-condition
+schema and encoder are in the adjacent `../condition/` directory. Low-level
+operators consolidated from EquiformerV3 are organized under `core/`.
 
-## 1. 输入与输出
+## 1. Inputs and outputs
 
-给定可分解条件
+Given a factorized condition
 
 $$
 c=(S_{\rm prim},hkl,s_{\rm term},b,M,n_{\rm layer},v_{\rm vac},\varepsilon,A),
 $$
 
-以及同一条件下的随机初始结构库
+and a bank of random initial structures under that condition,
 
 $$
 R_0\in\mathbb R^{B\times G\times N\times3},
 $$
 
-生成器一次前向得到
+the generator produces the output in one forward pass:
 
 $$
 \widehat R=G_\theta(R_0;Z,t,L,c).
 $$
 
-$Z$、$t$、$L$ 是已经构造出的完整 slab 图；$c$ 显式记录原胞、晶面、终止、超胞矩阵、层数、真空、应变和吸附物。完整图负责局部物理，$c$ 负责把同一材料背后的控制变量暴露给网络；没有 system-ID embedding。
+$Z$, $t$, and $L$ describe the fully constructed slab graph. The condition $c$
+explicitly records the primitive cell, facet, termination, supercell matrix,
+layer count, vacuum, strain, and adsorbate. The complete graph provides the
+local physics, while $c$ exposes the underlying construction variables to the
+network. There is no system-ID embedding.
 
-条件编码器在原胞分数坐标上建立最小镜像周期图，使用距离、相对表面法向投影和面内距离进行消息传递。原胞池化表示与晶格度量、实际 slab 度量、约化 Miller 指数、面间距、终止相位、超胞矩阵及其物理度量等不变量拼接。原胞原子换序或整体旋转不会改变条件标量。
+The condition encoder builds a minimum-image periodic graph from primitive-cell
+fractional coordinates and passes messages using distance, displacement along
+the surface normal, and in-plane distance. The pooled primitive-cell
+representation is concatenated with invariants including primitive and actual
+slab lattice metrics, the reduced Miller index, interplanar spacing,
+termination phase, the supercell matrix, and its physical metrics. Permuting
+primitive-cell atoms or globally rotating the structure does not change the
+condition scalars.
 
-编码器输出初始角色偏置 $B_t(c)$，以及每层每种角色的缩放和平移 $(\gamma_t^{(l)},\beta_t^{(l)})$：
+The encoder outputs an initial role bias $B_t(c)$ and a scale and shift
+$(\gamma_t^{(l)},\beta_t^{(l)})$ for each role in every layer:
 
 $$
 X_{i,0}^{(0)}=E_Z(Z_i)+E_t(t_i)+B_{t_i}(c),
@@ -38,24 +57,30 @@ $$
 +s_c\beta_{t_i}^{(l)}(c).
 $$
 
-只调制 $l=0$ 标量，再把结果送入 slab self、adsorbate self 和 interface cross attention；$l>0$ 的张量变换规则不变，所以坐标输出仍保持 SE(3) 等变。
+Only the $l=0$ scalars are modulated before entering slab self-attention,
+adsorbate self-attention, and interface cross-attention. The transformation
+rules of tensors with $l>0$ remain unchanged, preserving SE(3) equivariance of
+the coordinate output.
 
-模型只改变 role 2 和 role 3 的坐标：
+The model changes only the coordinates of role-2 and role-3 atoms:
 
 $$
 \widehat R_i=R_{0,i},\qquad t_i=1.
 $$
 
-## 2. 周期局部图
+## 2. Periodic local graphs
 
-对源原子 $j$、目标原子 $i$ 和周期平移 $n\in\mathbb Z^3$，定义有向边向量
+For source atom $j$, target atom $i$, and periodic translation
+$n\in\mathbb Z^3$, define the directed edge vector
 
 $$
 r_{ji}^{(n)}=R_{0,j}+n^\top L-R_{0,i},
 \qquad d_{ji}^{(n)}=\|r_{ji}^{(n)}\|_2.
 $$
 
-默认只枚举 $n_a,n_b\in\{-1,0,1\}$、$n_c=0$，每种关系对每个 query 最多保留24条最近边。三类边为
+By default, only $n_a,n_b\in\{-1,0,1\}$ and $n_c=0$ are enumerated. At most
+the 24 nearest edges per query are retained for each relation. The three edge
+types are
 
 $$
 \mathcal E_{SS}=\{j\in S_{\rm all}\to i\in S_{\rm all}:d_{ji}<r_S\},
@@ -70,30 +95,34 @@ $$
 \qquad d_{ji}<r_C.
 $$
 
-默认 $r_S=6.0$ Å、$r_A=4.5$ Å、$r_C=6.0$ Å。完整 slab 包括固定层和可弛豫层；固定层参与 slab self-attention 和 adsorbate → slab cross-attention 的查询，仍受同样的距离截断和邻居数限制。
+The default cutoffs are $r_S=6.0$ Å, $r_A=4.5$ Å, and $r_C=6.0$ Å. The full
+slab contains both fixed and movable layers. Fixed-layer atoms participate as
+queries in slab self-attention and adsorbate-to-slab cross-attention and remain
+subject to the same distance cutoffs and neighbor limits.
 
-## 3. SO(3) 输入表示
+## 3. SO(3) input representation
 
-每个节点的特征为
+Each node feature is
 
 $$
 X_i\in\mathbb R^{(l_{\max}+1)^2\times C},
 \qquad C=128,\quad l_{\max}=3,\quad m_{\max}=2.
 $$
 
-标量通道初始化为
+The scalar channels are initialized as
 
 $$
 X_{i,l=0}^{(0)}=E_Z(Z_i)+E_t(t_i)+B_{t_i}(c).
 $$
 
-局部边距离通过64个 Gaussian radial basis 展开：
+Local edge distances are expanded over 64 Gaussian radial basis functions:
 
 $$
 g_k(d)=\exp[-\gamma(d-\mu_k)^2].
 $$
 
-径向网络生成沿边局部坐标系的 $m=0$ 系数，再通过 Wigner-D 逆旋转产生球谐边嵌入：
+The radial network generates $m=0$ coefficients in an edge-aligned local frame.
+Inverse Wigner-D rotation then produces the spherical edge embedding:
 
 $$
 X_i^{(0)}\leftarrow X_i^{(0)}+
@@ -102,17 +131,27 @@ X_i^{(0)}\leftarrow X_i^{(0)}+
 D^{(l)}(Q_{ji})^{-1}\rho_l(g(d_{ji}),E_Z^{\rm src}(Z_j),E_Z^{\rm dst}(Z_i)).
 $$
 
-$Q_{ji}$ 把边方向对齐到局部轴。因为绝对坐标不进入标量 MLP，网络对整体平移不变；球谐/Wigner 路径保证高阶特征随旋转按对应不可约表示变换。此初始化沿用 `test_16`，几何边嵌入包括 $l=0$ 到 $l_{\max}$ 的分量，全原子图仍会在第一层之前引入界面环境信息。本版没有隔离初始化。
+$Q_{ji}$ aligns the edge direction with the local axis. Absolute coordinates do
+not enter the scalar MLP, so the network is invariant to global translation.
+The spherical-harmonic and Wigner-D path ensures that higher-order features
+transform according to their irreducible representations under rotation. This
+initialization is retained from `test_16`. The geometric edge embedding covers
+$l=0$ through $l_{\max}$, so the all-atom graph introduces interface
+environment information before the first layer. Initialization is not isolated
+in this version.
 
-## 4. EquiformerV3 图注意力
+## 4. EquiformerV3 graph attention
 
-对关系 $q\in\{SS,AA,SA\}$，传入节点特征前先做等变归一化和已有条件调制 $C_k$（只改变 $l=0$）：
+For relation $q\in\{SS,AA,SA\}$, node features first undergo equivariant
+normalization and the existing condition modulation $C_k$, which changes only
+$l=0$:
 
 $$
 \bar X=C_k\!\left(\operatorname{EqNorm}(X)\right).
 $$
 
-每条边把源和目标表示旋转到边对齐坐标系，结合元素嵌入及径向权重：
+For every edge, source and target representations are rotated into an
+edge-aligned frame and combined with element embeddings and radial weights:
 
 $$
 M_{ji}^{q}=\operatorname{SO2Conv}_2\!\left(
@@ -122,9 +161,12 @@ M_{ji}^{q}=\operatorname{SO2Conv}_2\!\left(
 \right]\right).
 $$
 
-`use_add_merge=true` 时，$\Psi$ 对源、目标使用不同的径向通道权重后相加，避免拼接带来的约两倍 SO(2) 输入计算。$\sigma_{S^2}$ 使用 EquiformerV3 的 SwiGLU-$S^2$ 激活。
+When `use_add_merge=true`, $\Psi$ applies separate radial channel weights to
+the source and target and adds the results, avoiding the approximately twofold
+SO(2) input cost of concatenation. $\sigma_{S^2}$ is EquiformerV3's
+SwiGLU-$S^2$ activation.
 
-注意力权重是旋转不变量：
+Attention weights are rotationally invariant:
 
 $$
 \alpha_{ji,h}^{q}=
@@ -132,14 +174,17 @@ $$
 \left(a_h^\top u_{ji,h}^{q}\right).
 $$
 
-多头 value 加权、旋转回全局坐标并按目标节点聚合：
+The multi-head values are weighted, rotated back to the global frame, and
+aggregated by target node:
 
 $$
 A_i^q=\sum_{j\in\mathcal N_q(i)}
 D(Q_{ji})^{-1}\left(\alpha_{ji}^q M_{ji}^q\right).
 $$
 
-三个分支参数互不共享；两个交叉方向共享同一套 interface 参数。令 $m=\mathbf1_{S_{\rm all}\cup A}$，单层先进行自注意力残差更新：
+The three branches do not share parameters. The two cross-attention directions
+share one interface parameter set. Let $m=\mathbf1_{S_{\rm all}\cup A}$. Each
+layer first applies the self-attention residual updates:
 
 $$
 U = X + \frac{m}{\sqrt2}\odot
@@ -151,20 +196,31 @@ $$
 V=U+\frac{m}{\sqrt2}\odot A^{SA}(\bar U).
 $$
 
-交叉注意力读取的是更新后的 $U$，不是旧的 $X$；其后才计算 FFN：
+Cross-attention reads the updated $U$, not the old $X$. The FFN is applied
+afterward:
 
 $$
 X^+=V+m\odot\operatorname{FFN}_{\mathrm{SwiGLU}-S^2}
 \!\left(C_k(N_{\rm ffn}(V))\right).
 $$
 
-两次 $N_{\rm attn}$ 复用同一组原有归一化参数，$C_k$ 也复用原有 FiLM；各注意力残差仍保留原系数 $1/\sqrt2$，没有增加参数或截断梯度。两条 self 路径的目标集合不重叠。
+Both $N_{\rm attn}$ applications reuse the same existing normalization
+parameters, and $C_k$ reuses the existing FiLM transformation. Every attention
+residual retains its original coefficient $1/\sqrt2$. No parameters are added,
+and gradients are not truncated. The target sets of the two self-attention
+paths do not overlap.
 
-默认串联4层。固定节点的 $X_i$ 与其他有效节点一起接受注意力和 FFN 残差；self 更新后的固定层表示也会被本层 cross 读取，并继续进入下一层。padding 特征不更新。这里更新的是隐藏表示，不是中间坐标；输出头仍然只在末尾一次性修改可弛豫表面和吸附物坐标。
+Four layers are stacked by default. Fixed-node features $X_i$ receive attention
+and FFN residuals alongside all other valid nodes. Their self-updated
+representations are read by cross-attention within the same layer and passed to
+the next layer. Padding features are not updated. These updates affect hidden
+representations rather than intermediate coordinates. The output heads modify
+movable-surface and adsorbate coordinates only once, at the end of the network.
 
-## 5. 平滑截断
+## 5. Smooth cutoffs
 
-距离注意力使用五阶多项式包络。令 $x=d/r_c$：
+Distance-aware attention uses a fifth-order polynomial envelope. Let
+$x=d/r_c$:
 
 $$
 e(d)=
@@ -174,29 +230,32 @@ e(d)=
 \end{cases}
 $$
 
-其中 $p=5$，$a=-(p+1)(p+2)/2$，$b=p(p+2)$，$c=-p(p+1)/2$。包络既参与 softmax 的指数权重，也乘入边嵌入，使相互作用在截断位置平滑衰减。
+where $p=5$, $a=-(p+1)(p+2)/2$, $b=p(p+2)$, and $c=-p(p+1)/2$. The envelope
+contributes to the exponential weight used by softmax and multiplies the edge
+embedding, causing interactions to decay smoothly to zero at the cutoff.
 
-## 6. 从 l=1 读取坐标位移
+## 6. Reading coordinate displacements from l=1
 
-末层等变归一化后取
+After the final equivariant normalization, the model reads
 
 $$
 V_i=X_{i,l=1}\in\mathbb R^{3\times C}.
 $$
 
-三个输出头仅对通道做共享线性组合：
+Each output head applies a channel-shared linear combination:
 
 $$
 v_{i,k}=\sum_{c=1}^{C}w_cV_{i,kc},\qquad k\in\{x,y,z\}.
 $$
 
-同一组 $w_c$ 用于三个空间分量，因此不会破坏 $l=1$ 的旋转变换规律。表面位移为
+The same $w_c$ is used for all three spatial components, preserving the
+rotation transformation rule of $l=1$. The surface displacement is
 
 $$
 \Delta R_i^{S}=s_S v_i^S,\qquad i\in S_{\rm mov}.
 $$
 
-吸附物分解为整体和平移之外的内部变化：
+The adsorbate output is decomposed into global and internal changes:
 
 $$
 \Delta c=s_c\frac1{|A|}\sum_{i\in A}v_i^c,
@@ -207,7 +266,7 @@ $$
 \qquad \sum_{i\in A}\Delta r_i=0.
 $$
 
-最终
+The final adsorbate coordinates are
 
 $$
 \widehat R_i=
@@ -216,15 +275,27 @@ $$
 \qquad i\in A.
 $$
 
-只包裹吸附物中心，不逐原子包裹，从而避免把跨周期分子撕开。默认 $s_S=0.5$ Å、$s_c=3.0$ Å、$s_r=1.0$ Å。三个头零初始化，所以未训练模型严格从恒等映射开始。
+Only the adsorbate center is wrapped; individual atoms are not. This avoids
+splitting a molecule that crosses a periodic boundary. The defaults are
+$s_S=0.5$ Å, $s_c=3.0$ Å, and $s_r=1.0$ Å. All three heads are initialized to
+zero, so the untrained model begins as an exact identity mapping.
 
-## 7. 当前边界
+## 7. Current limitations
 
-- 这是一步条件生成器，不是力场，也不做多步弛豫。
-- 当前没有全局模式 token 或盆地路由；多模态性完全来自不同 $R_0$ 及其局部交互。
-- 吸附物构象通过逐原子 $l=1$ 内部残差改变，没有显式键长/键角约束；几何有效性仍由数据、Drifting 特征与结构检查共同约束。
-- 旧 CatFlow checkpoint 与本模型结构不兼容，加载时应明确报错。
+- This is a one-pass conditional generator, not a force field or a multistep
+  relaxation method.
+- There is no global mode token or basin-routing mechanism. Multimodality comes
+  entirely from distinct $R_0$ samples and their local interactions.
+- Adsorbate conformations change through per-atom $l=1$ internal residuals,
+  without explicit bond-length or bond-angle constraints. Geometric validity
+  remains jointly constrained by the data, Drifting features, and structural
+  checks.
+- Legacy CatFlow checkpoints are incompatible with this architecture and should
+  fail explicitly when loaded.
 
-## 8. 默认规模
+## 8. Default scale
 
-三套固定体系配置位于 `../../config/`，它们共享完全相同的模型参数：4层、128通道、8头、$l_{\max}=3$、$m_{\max}=2$、FFN 256、每种关系最多24邻居；只允许数据体系和输出目录不同。
+The fixed-system configurations are stored in `../../config/`. They use the
+same model settings: four layers, 128 channels, eight heads,
+$l_{\max}=3$, $m_{\max}=2$, an FFN width of 256, and at most 24 neighbors per
+relation. Only the data systems and output directories differ.
